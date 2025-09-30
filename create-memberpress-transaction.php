@@ -1,3 +1,5 @@
+<?php 
+
 /**
  * Gravity Flow Custom Step: Create MemberPress Transaction.
  *

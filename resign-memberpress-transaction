@@ -1,0 +1,123 @@
+/**
+ * Gravity Flow Custom Step: Resign Memberpress Transaction.
+ *
+ * Company: MemberFix
+ * URL: https://memberfix.rocks
+ * Author: Denys Melnychuk
+ * Date: 25.02.2025
+ * Version: 1.0
+ */
+
+// Wait until Gravity Flow is ready before declaring the step class.
+add_action('gravityflow_loaded', function() {
+
+    // Define a custom step class
+    class Gravity_Flow_Step_Resign_Cancel_Mepr_Txn extends Gravity_Flow_Step {
+
+        // Unique identifier for this step type
+        public $_step_type = 'resign_mepr_transaction_step';
+
+        // Label for the step
+        public function get_label() {
+            return 'Resign Mepr Transaction';
+        }
+
+        // Icon for the step
+        public function get_icon_url() {
+            return '<i class="fa fa-indent"></i>';
+        }
+
+        // Define settings fields
+        public function get_settings() {
+            return array(
+                'title'  => 'Details',
+                'fields' => array(
+                    array(
+                        'name'       => 'member_number_field',
+                        'class'      => 'merge-tag-support',
+                        'required'   => true,
+                        'label'      => 'Member Number field',
+                        'type'       => 'text',
+                    ),
+                    array(
+                        'name'       => 'entry_timeline_note',
+                        'class'      => 'merge-tag-support',
+                        'required'   => true,
+                        'label'      => 'Entries timeline note',
+                        'type'       => 'text',
+                    ),
+                ),
+            );
+        }
+
+        // Process the step
+        public function process() {
+
+            // Retrieve the entry associated with this step
+            $entry = $this->get_entry();
+
+            // Retrieve and process settings. Member number is user meta
+            $member_number = GFCommon::replace_variables($this->get_setting('member_number_field'), $this->get_form(), $entry, false, false, false, 'text');
+          	
+            $date = new DateTime();
+            $mepr_date_today = $date->modify("-1 day")->format('Y-m-d 23:59:59');
+
+            global $wpdb;
+            $user_id = $wpdb->get_var($wpdb->prepare(
+                "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = 'mepr_member_number' AND meta_value = %s",
+                $member_number
+            ));
+            $user = $user_id ? get_user_by('ID', $user_id) : null;
+            //error_log('Looking up user by member number: ' . $member_number . ', found user_id: ' . ($user_id ?: 'not found'));
+
+            //error_log('Processing update step');
+
+            // Handle case when current_transaction_id is empty (process pending transactions)
+            if (empty($current_transaction_id) && $user) {
+                //error_log('Processing transactions for user ID: ' . $user->ID);
+
+                $txn_mepr = MeprTransaction::get_all_by_user_id($user->ID);
+
+                foreach ($txn_mepr as $txn) {
+                    $txn = new MeprTransaction($txn->id);
+                   // error_log('Checking transaction ID: ' . $txn->id . ' with status: ' . $txn->status . ' and expiration: ' . $txn->expires_at);
+                    // Check if expiration is in the future, if yes - set expiry day to mepr_date_today
+                    if (strtotime($txn->expires_at) > time()) {
+                        $txn_id = $txn->id;
+
+                        if ($txn_id) {
+                            $txn = new MeprTransaction($txn_id);
+							
+
+                                $txn->expires_at = $mepr_date_today;
+                                $txn->store();
+								//error_log('Transaction ID: ' . $txn->id . ' set expired on : ' . $mepr_date_today );
+                                
+                                $event = MeprEvent::record('transaction-expired', $txn);                
+                                do_action('mepr-event-transaction-expired', $event);
+                               // error_log('Triggered mepr-event-transaction-expired with event for transaction ID: ' . $txn->id);
+                            }
+                        }
+                    }
+                }
+     
+
+                    // Add a note to the entry's timeline
+                    $entry_timeline_note = GFCommon::replace_variables($this->get_setting('entry_timeline_note'), $this->get_form(), $entry, false, false, false, 'text');
+                    gravity_flow()->add_timeline_note($entry['id'], $entry_timeline_note);
+                    
+                    
+                    // Sync user meta with WP Fusion
+                   // wp_fusion()->user->apply_tags([3], $user->ID);
+                   // wp_fusion()->user->push_user_meta($user->ID);
+                    
+                    return true;
+
+     
+        }
+    }
+
+    // Register the custom step class
+    Gravity_Flow_Steps::register(new Gravity_Flow_Step_Resign_Cancel_Mepr_Txn());
+
+});

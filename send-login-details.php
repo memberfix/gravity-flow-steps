@@ -1,3 +1,5 @@
+<?php
+
 /**
  * Gravity Flow Step: Send Login Details.
  *
